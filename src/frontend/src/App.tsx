@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   AlertCircle,
   BarChart2,
+  Check,
+  Copy,
   Loader2,
   RotateCcw,
   TrendingUp,
@@ -68,10 +70,8 @@ function SequenceCell({
       onMouseLeave={() => setHovered(false)}
     >
       <span
-        className={`font-mono text-base cursor-default select-none px-0.5 rounded transition-colors ${
-          isBull
-            ? "text-emerald-400 hover:bg-emerald-500/10"
-            : "text-red-400 hover:bg-red-500/10"
+        className={`font-mono text-sm font-bold cursor-default select-none inline-flex items-center justify-center w-8 h-8 rounded-md transition-all ${
+          isBull ? "cell-bullish" : "cell-bearish"
         }`}
       >
         {bit}
@@ -100,6 +100,58 @@ function SequenceCell({
   );
 }
 
+function CopyButton({
+  sequence,
+  index,
+}: { sequence: bigint[]; index: number }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const text = sequence.map((b) => b.toString()).join(",");
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      data-ocid={`analyzer.result.copy_button.${index}`}
+      onClick={handleCopy}
+      title="Copy sequence"
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-muted/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-primary transition-all text-xs font-mono ml-1 shrink-0"
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {copied ? (
+          <motion.span
+            key="check"
+            initial={{ scale: 0.7, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.7, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="flex items-center gap-1 text-emerald-400"
+          >
+            <Check className="w-3 h-3" />
+            Copied
+          </motion.span>
+        ) : (
+          <motion.span
+            key="copy"
+            initial={{ scale: 0.7, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.7, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="flex items-center gap-1"
+          >
+            <Copy className="w-3 h-3" />
+            Copy
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </button>
+  );
+}
+
 function ResultRow({
   result,
   index,
@@ -118,10 +170,11 @@ function ResultRow({
       initial={{ opacity: 0, x: -16 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.08, duration: 0.35, ease: "easeOut" }}
-      className="flex flex-col sm:flex-row sm:items-start gap-2 py-4 border-b border-border last:border-0"
+      className="flex flex-col sm:flex-row sm:items-start gap-3 py-5 px-1 border-b border-border/60 last:border-0 group"
     >
-      <div className="min-w-[90px] pt-0.5">
-        <span className="font-display font-bold text-lg tracking-widest text-primary">
+      {/* Ticker label */}
+      <div className="min-w-[96px] pt-1">
+        <span className="font-display font-bold text-xl tracking-widest text-primary drop-shadow-[0_0_12px_oklch(0.78_0.16_75/0.5)]">
           {result.ticker}
         </span>
       </div>
@@ -135,33 +188,30 @@ function ResultRow({
           <span className="font-mono text-xs">{result.error}</span>
         </div>
       ) : (
-        <div className="flex flex-col gap-0.5">
-          <div className="flex items-center flex-wrap gap-x-0 gap-y-0">
-            {Array.from(result.sequence).map((bit, i) => (
-              <span key={`seq-${result.ticker}-${i}`}>
-                <SequenceCell
-                  bit={Number(bit)}
-                  date={dates[i] ?? ""}
-                  open={
-                    result.opens?.[i] !== undefined
-                      ? Number(result.opens[i])
-                      : undefined
-                  }
-                  close={
-                    result.closes?.[i] !== undefined
-                      ? Number(result.closes[i])
-                      : undefined
-                  }
-                />
-                {i < result.sequence.length - 1 && (
-                  <span className="font-mono text-muted-foreground/40 text-base">
-                    ,
-                  </span>
-                )}
-              </span>
+        <div className="flex flex-col gap-2">
+          {/* Sequence chips + copy button */}
+          <div className="flex items-center flex-wrap gap-1.5">
+            {result.sequence.map((bit, i) => (
+              <SequenceCell
+                key={`seq-${result.ticker}-${i}`}
+                bit={Number(bit)}
+                date={dates[i] ?? ""}
+                open={
+                  result.opens?.[i] !== undefined
+                    ? Number(result.opens[i])
+                    : undefined
+                }
+                close={
+                  result.closes?.[i] !== undefined
+                    ? Number(result.closes[i])
+                    : undefined
+                }
+              />
             ))}
+            <CopyButton sequence={result.sequence} index={index} />
           </div>
-          <span className="font-mono text-xs text-muted-foreground">
+          {/* Date range */}
+          <span className="font-mono text-xs text-muted-foreground/70 tracking-wide">
             {firstDate} – {lastDate}
           </span>
         </div>
@@ -188,6 +238,17 @@ function Analyzer() {
     mutate({ tickers, days });
   };
 
+  // Compute a shared date range for the results header
+  const firstResult = data?.[0];
+  const sharedDates =
+    firstResult && !firstResult.error
+      ? getTradingDates(firstResult.sequence.length)
+      : null;
+  const rangeLabel =
+    sharedDates && sharedDates.length > 0
+      ? `${sharedDates[0]} – ${sharedDates[sharedDates.length - 1]}`
+      : null;
+
   const hasResults = data && data.length > 0;
   const hasNoData = !hasResults && !isPending && !isError;
 
@@ -198,7 +259,7 @@ function Analyzer() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
           <div className="flex items-center gap-2">
             <BarChart2 className="w-5 h-5 text-primary" />
-            <span className="font-display font-bold text-base tracking-tight text-foreground">
+            <span className="font-display font-bold text-base tracking-tight header-glow">
               Stock Sequence Analyzer
             </span>
           </div>
@@ -214,7 +275,7 @@ function Analyzer() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          className="bg-card border border-border rounded-lg p-6 mb-8 shadow-amber"
+          className="bg-card border border-border rounded-xl p-6 mb-8 input-card-glow"
         >
           <div className="flex items-center gap-2 mb-5">
             <TrendingUp className="w-4 h-4 text-primary" />
@@ -271,7 +332,7 @@ function Analyzer() {
               data-ocid="analyzer.submit_button"
               onClick={handleAnalyze}
               disabled={isPending}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 font-mono font-semibold tracking-wider uppercase text-xs px-6 h-10 gap-2"
+              className="analyze-btn font-mono font-semibold tracking-wider uppercase text-xs px-6 h-10 gap-2"
             >
               {isPending ? (
                 <>
@@ -331,7 +392,7 @@ function Analyzer() {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="flex items-start gap-3 p-4 rounded-lg bg-destructive/10 border border-destructive/30 text-red-400"
+                className="flex items-start gap-3 p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-red-400"
               >
                 <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
                 <div>
@@ -395,7 +456,7 @@ function Analyzer() {
                           prev ? `${prev}, ${ticker}` : ticker,
                         )
                       }
-                      className="px-2.5 py-1 rounded border border-border bg-card hover:border-primary hover:text-primary transition-colors text-xs font-mono text-muted-foreground"
+                      className="px-2.5 py-1 rounded-md border border-border bg-card hover:border-primary hover:text-primary transition-colors text-xs font-mono text-muted-foreground"
                     >
                       {ticker}
                     </button>
@@ -414,18 +475,23 @@ function Analyzer() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="bg-card border border-border rounded-lg overflow-hidden"
+                className="bg-card border border-border rounded-xl overflow-hidden results-card-glow"
               >
-                <div className="px-6 py-3 border-b border-border bg-muted/30">
-                  <div className="flex items-center gap-2">
+                <div className="px-6 py-3.5 border-b border-border bg-muted/20">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
                       Results
                     </span>
-                    <span className="font-mono text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                    <span className="font-mono text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
                       {data.length} ticker{data.length !== 1 ? "s" : ""}
                     </span>
-                    <span className="font-mono text-xs text-muted-foreground ml-auto">
-                      Hover each digit for open/close prices
+                    {rangeLabel && (
+                      <span className="font-mono text-xs text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border border-border">
+                        {rangeLabel}
+                      </span>
+                    )}
+                    <span className="font-mono text-xs text-muted-foreground/60 ml-auto hidden sm:block">
+                      Hover each digit for open/close
                     </span>
                   </div>
                 </div>
