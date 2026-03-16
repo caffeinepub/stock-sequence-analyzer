@@ -27,26 +27,52 @@ const EMPTY_STATE_CELLS: Array<"bear" | "bull"> = [
   "bull",
 ];
 
-function getTradingDates(days: number): string[] {
-  const dates: string[] = [];
-  const cursor = new Date();
-  cursor.setDate(cursor.getDate() - 1);
+// 1.5 days in seconds — any gap larger means non-trading days between chips
+const GAP_THRESHOLD_SECS = 129600;
 
-  while (dates.length < days) {
-    const dow = cursor.getDay();
-    if (dow !== 0 && dow !== 6) {
-      dates.push(
-        cursor.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      );
-    }
-    cursor.setDate(cursor.getDate() - 1);
-  }
-
-  return dates.reverse();
+function tsToDate(ts: bigint): string {
+  return new Date(Number(ts) * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function fmt(price: number): string {
   return `$${price.toFixed(2)}`;
+}
+
+function GapIndicator({ label }: { label: string }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      className="relative inline-flex flex-col items-center justify-start gap-0.5"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Dotted vertical line separator */}
+      <div className="gap-indicator flex flex-col items-center justify-center w-5 h-8 cursor-default">
+        <div className="flex flex-col items-center gap-[3px]">
+          <span className="w-[2px] h-[2px] rounded-full bg-muted-foreground/25" />
+          <span className="w-[2px] h-[2px] rounded-full bg-muted-foreground/25" />
+          <span className="w-[2px] h-[2px] rounded-full bg-muted-foreground/25" />
+        </div>
+      </div>
+      {/* Spacer to align with date label beneath chips */}
+      <span className="text-[9px] font-mono text-transparent leading-none whitespace-nowrap select-none">
+        &nbsp;
+      </span>
+      {/* Tooltip */}
+      {hovered && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-50 pointer-events-none">
+          <div className="bg-popover border border-border rounded-md shadow-lg px-2.5 py-1.5 text-xs font-mono whitespace-nowrap text-muted-foreground">
+            {label}
+          </div>
+          <div className="w-2 h-2 bg-popover border-r border-b border-border rotate-45 mx-auto -mt-1" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SequenceCell({
@@ -65,7 +91,7 @@ function SequenceCell({
 
   return (
     <div
-      className="relative inline-block"
+      className="relative inline-flex flex-col items-center gap-0.5"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -76,10 +102,12 @@ function SequenceCell({
       >
         {bit}
       </span>
+      <span className="text-[9px] font-mono text-muted-foreground/60 leading-none whitespace-nowrap">
+        {date}
+      </span>
       {hovered && open !== undefined && close !== undefined && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-50 pointer-events-none">
           <div className="bg-popover border border-border rounded-md shadow-lg px-3 py-2 text-xs font-mono whitespace-nowrap">
-            <div className="text-muted-foreground mb-1 text-center">{date}</div>
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">Open</span>
@@ -119,7 +147,7 @@ function CopyButton({
       data-ocid={`analyzer.result.copy_button.${index}`}
       onClick={handleCopy}
       title="Copy sequence"
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-muted/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-primary transition-all text-xs font-mono ml-1 shrink-0"
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-muted/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-primary transition-all text-xs font-mono ml-1 shrink-0 self-start mt-1"
     >
       <AnimatePresence mode="wait" initial={false}>
         {copied ? (
@@ -152,6 +180,13 @@ function CopyButton({
   );
 }
 
+function gapLabel(diffSecs: number): string {
+  const days = Math.round(diffSecs / 86400);
+  if (days === 2) return "Weekend";
+  if (days === 3) return "Weekend";
+  return `${days - 1}d gap`;
+}
+
 function ResultRow({
   result,
   index,
@@ -159,10 +194,10 @@ function ResultRow({
   result: StockAnalysisResult;
   index: number;
 }) {
-  const seqLen = result.sequence.length;
-  const dates = getTradingDates(seqLen);
-  const firstDate = dates[0] ?? "";
-  const lastDate = dates[dates.length - 1] ?? "";
+  const ts = result.timestamps ?? [];
+  const hasTimestamps = ts.length > 0;
+  const firstDate = hasTimestamps ? tsToDate(ts[0]) : "";
+  const lastDate = hasTimestamps ? tsToDate(ts[ts.length - 1]) : "";
 
   return (
     <motion.div
@@ -189,31 +224,55 @@ function ResultRow({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {/* Sequence chips + copy button */}
-          <div className="flex items-center flex-wrap gap-1.5">
-            {result.sequence.map((bit, i) => (
-              <SequenceCell
-                key={`seq-${result.ticker}-${i}`}
-                bit={Number(bit)}
-                date={dates[i] ?? ""}
-                open={
-                  result.opens?.[i] !== undefined
-                    ? Number(result.opens[i])
-                    : undefined
-                }
-                close={
-                  result.closes?.[i] !== undefined
-                    ? Number(result.closes[i])
-                    : undefined
-                }
-              />
-            ))}
+          {/* Sequence chips + gap indicators + copy button */}
+          <div className="flex items-start flex-wrap gap-y-1.5">
+            {result.sequence.map((bit, i) => {
+              const prevTs = i > 0 ? ts[i - 1] : null;
+              const currTs = ts[i] ?? null;
+              const showGap =
+                prevTs !== null &&
+                currTs !== null &&
+                Number(currTs) - Number(prevTs) > GAP_THRESHOLD_SECS;
+              const diffSecs =
+                prevTs !== null && currTs !== null
+                  ? Number(currTs) - Number(prevTs)
+                  : 0;
+
+              return (
+                <div
+                  key={`seq-${result.ticker}-${i}`}
+                  className="inline-flex items-start"
+                >
+                  {showGap && <GapIndicator label={gapLabel(diffSecs)} />}
+                  <SequenceCell
+                    bit={Number(bit)}
+                    date={
+                      hasTimestamps && ts[i] !== undefined
+                        ? tsToDate(ts[i])
+                        : ""
+                    }
+                    open={
+                      result.opens?.[i] !== undefined
+                        ? Number(result.opens[i])
+                        : undefined
+                    }
+                    close={
+                      result.closes?.[i] !== undefined
+                        ? Number(result.closes[i])
+                        : undefined
+                    }
+                  />
+                </div>
+              );
+            })}
             <CopyButton sequence={result.sequence} index={index} />
           </div>
           {/* Date range */}
-          <span className="font-mono text-xs text-muted-foreground/70 tracking-wide">
-            {firstDate} – {lastDate}
-          </span>
+          {firstDate && lastDate && (
+            <span className="font-mono text-xs text-muted-foreground/70 tracking-wide">
+              {firstDate} – {lastDate}
+            </span>
+          )}
         </div>
       )}
     </motion.div>
@@ -240,13 +299,12 @@ function Analyzer() {
 
   // Compute a shared date range for the results header
   const firstResult = data?.[0];
-  const sharedDates =
-    firstResult && !firstResult.error
-      ? getTradingDates(firstResult.sequence.length)
-      : null;
   const rangeLabel =
-    sharedDates && sharedDates.length > 0
-      ? `${sharedDates[0]} – ${sharedDates[sharedDates.length - 1]}`
+    firstResult &&
+    !firstResult.error &&
+    firstResult.timestamps &&
+    firstResult.timestamps.length > 0
+      ? `${tsToDate(firstResult.timestamps[0])} – ${tsToDate(firstResult.timestamps[firstResult.timestamps.length - 1])}`
       : null;
 
   const hasResults = data && data.length > 0;
@@ -424,9 +482,9 @@ function Analyzer() {
                     <BarChart2 className="w-7 h-7 text-muted-foreground" />
                   </div>
                   <div className="absolute -top-1 -right-1 flex gap-0.5">
-                    {EMPTY_STATE_CELLS.map((kind) => (
+                    {EMPTY_STATE_CELLS.map((kind, idx) => (
                       <div
-                        key={`preview-${kind}-${Math.random().toString(36).slice(2)}`}
+                        key={kind + String(idx)}
                         className={`w-2.5 h-2.5 rounded-sm ${
                           kind === "bull"
                             ? "bg-emerald-500/30"
@@ -491,7 +549,7 @@ function Analyzer() {
                       </span>
                     )}
                     <span className="font-mono text-xs text-muted-foreground/60 ml-auto hidden sm:block">
-                      Hover each digit for open/close
+                      Hover each digit for open/close · gaps = non-trading days
                     </span>
                   </div>
                 </div>

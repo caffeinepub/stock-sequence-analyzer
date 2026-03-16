@@ -17,6 +17,7 @@ export interface StockAnalysisResult {
     sequence: Array<bigint>;
     opens: Array<number>;
     closes: Array<number>;
+    timestamps?: Array<bigint>;
 }
 export interface TransformationOutput {
     status: bigint;

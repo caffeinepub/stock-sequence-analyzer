@@ -3,6 +3,8 @@ import Text "mo:core/Text";
 import Runtime "mo:core/Runtime";
 import List "mo:core/List";
 import Float "mo:core/Float";
+import Int "mo:core/Int";
+import Time "mo:core/Time";
 import OutCall "http-outcalls/outcall";
 
 actor {
@@ -11,6 +13,7 @@ actor {
     sequence : [Nat];
     opens : [Float];
     closes : [Float];
+    timestamps : [Float];
     error : ?Text;
   };
 
@@ -98,34 +101,62 @@ actor {
     let response = try {
       await OutCall.httpGetRequest(url, [], transform);
     } catch (e) {
-      return { ticker; sequence = []; opens = []; closes = []; error = ?("HTTP error: " # e.message()) };
+      return { ticker; sequence = []; opens = []; closes = []; timestamps = []; error = ?("HTTP error: " # e.message()) };
     };
     let opens = switch (extractFloatArray(response, "open")) {
-      case null { return { ticker; sequence = []; opens = []; closes = []; error = ?"Could not parse open prices" } };
+      case null { return { ticker; sequence = []; opens = []; closes = []; timestamps = []; error = ?"Could not parse open prices" } };
       case (?arr) arr;
     };
     let closes = switch (extractFloatArray(response, "close")) {
-      case null { return { ticker; sequence = []; opens = []; closes = []; error = ?"Could not parse close prices" } };
+      case null { return { ticker; sequence = []; opens = []; closes = []; timestamps = []; error = ?"Could not parse close prices" } };
       case (?arr) arr;
     };
-    let len = Nat.min(opens.size(), closes.size());
-    if (len == 0) {
-      return { ticker; sequence = []; opens = []; closes = []; error = ?"No price data found" };
+    let tsArr = switch (extractFloatArray(response, "timestamp")) {
+      case null { return { ticker; sequence = []; opens = []; closes = []; timestamps = []; error = ?"Could not parse timestamps" } };
+      case (?arr) arr;
     };
-    let available = len;
+
+    // Compute today's UTC midnight boundary (in seconds)
+    let nowNs : Int = Time.now();
+    let nowSec : Int = nowNs / 1_000_000_000;
+    let todayStartSec : Int = nowSec - (nowSec % 86400);
+    let todayStartFloat : Float = natToFloat(Int.abs(todayStartSec));
+
+    let len = Nat.min(Nat.min(opens.size(), closes.size()), tsArr.size());
+    if (len == 0) {
+      return { ticker; sequence = []; opens = []; closes = []; timestamps = []; error = ?"No price data found" };
+    };
+
+    // Find the last index of data that is strictly before today (exclude today)
+    var endIdx : Nat = 0;
+    var j = 0;
+    while (j < len) {
+      if (tsArr[j] < todayStartFloat) {
+        endIdx := j + 1;
+      };
+      j += 1;
+    };
+
+    let available = endIdx;
+    if (available == 0) {
+      return { ticker; sequence = []; opens = []; closes = []; timestamps = []; error = ?"No historical data available (excluding today)" };
+    };
+
     let start : Nat = if (available > days) { available - days } else { 0 };
     let seq = List.empty<Nat>();
     let slicedOpens = List.empty<Float>();
     let slicedCloses = List.empty<Float>();
+    let slicedTs = List.empty<Float>();
     var i = start;
     while (i < available) {
       let bit : Nat = if (closes[i] > opens[i]) 1 else 0;
       seq.add(bit);
       slicedOpens.add(opens[i]);
       slicedCloses.add(closes[i]);
+      slicedTs.add(tsArr[i]);
       i += 1;
     };
-    { ticker; sequence = seq.toArray(); opens = slicedOpens.toArray(); closes = slicedCloses.toArray(); error = null }
+    { ticker; sequence = seq.toArray(); opens = slicedOpens.toArray(); closes = slicedCloses.toArray(); timestamps = slicedTs.toArray(); error = null }
   };
 
   public shared ({ caller = _ }) func analyzeStocks(tickers : [Text], days : Nat) : async [StockAnalysisResult] {
