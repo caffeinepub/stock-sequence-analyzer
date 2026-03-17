@@ -30,8 +30,9 @@ const EMPTY_STATE_CELLS: Array<"bear" | "bull"> = [
 // 1.5 days in seconds — any gap larger means non-trading days between chips
 const GAP_THRESHOLD_SECS = 129600;
 
-function tsToDate(ts: bigint): string {
+function tsToDate(ts: bigint | number): string {
   return new Date(Number(ts) * 1000).toLocaleDateString("en-US", {
+    weekday: "short",
     month: "short",
     day: "numeric",
   });
@@ -46,7 +47,7 @@ function GapIndicator({ label }: { label: string }) {
 
   return (
     <div
-      className="relative inline-flex flex-col items-center justify-start gap-0.5"
+      className="relative inline-flex flex-col items-center justify-start gap-1"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -59,7 +60,7 @@ function GapIndicator({ label }: { label: string }) {
         </div>
       </div>
       {/* Spacer to align with date label beneath chips */}
-      <span className="text-[9px] font-mono text-transparent leading-none whitespace-nowrap select-none">
+      <span className="text-[11px] font-mono text-transparent leading-none whitespace-nowrap select-none">
         &nbsp;
       </span>
       {/* Tooltip */}
@@ -91,7 +92,7 @@ function SequenceCell({
 
   return (
     <div
-      className="relative inline-flex flex-col items-center gap-0.5"
+      className="relative inline-flex flex-col items-center gap-1"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -102,7 +103,7 @@ function SequenceCell({
       >
         {bit}
       </span>
-      <span className="text-[9px] font-mono text-muted-foreground/60 leading-none whitespace-nowrap">
+      <span className="text-[11px] font-mono text-muted-foreground leading-none whitespace-nowrap bg-muted/30 rounded px-1">
         {date}
       </span>
       {hovered && open !== undefined && close !== undefined && (
@@ -549,7 +550,7 @@ function Analyzer() {
                       </span>
                     )}
                     <span className="font-mono text-xs text-muted-foreground/60 ml-auto hidden sm:block">
-                      Hover each digit for open/close · gaps = non-trading days
+                      Dates shown below each bar · hover for open/close prices
                     </span>
                   </div>
                 </div>
